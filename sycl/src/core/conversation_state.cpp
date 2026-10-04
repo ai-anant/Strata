@@ -2,10 +2,12 @@
 #include <sycl/sycl.hpp>
 #include <dpct/dpct.hpp>
 #include "strata/core/conversation_snapshot.hpp"
+#include "strata/sycl_queue.hpp"
 #include "conversation_checked.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <limits>
 
 namespace strata::core {
@@ -41,6 +43,13 @@ bool copy(void* dst, const void* src, size_t bytes, std::string& error) {
     if (!bytes) return true;
     if (!dst || !src) return fail(error, "missing running-state buffer");
     try {
+        // The snapshot transfer already avoided this. The running-state copies (GDN, PLE, indexer tails)
+        // are the same shape: a pageable vector at one end, and sometimes host USM at the other. A queue
+        // memcpy with neither end on the device hung the Arc copy engine. Device ends still use the queue.
+        if (strata::host_only_copy(dst, src)) {
+            std::memcpy(dst, src, bytes);
+            return true;
+        }
         dpct::get_in_order_queue().memcpy(dst, src, bytes).wait();
         return true;
     } catch (sycl::exception const& e) {

@@ -1753,7 +1753,7 @@ int main(int argc, char **argv) try {
                         (int64_t)(prop.get_global_mem_size() >> 20);
                     if (reserve_mib * 100 > 12 * total_mib) {
                         own = false;
-                        why = "CUDA" + std::to_string(d) + " has " + std::to_string(total_mib) + " MiB";
+                        why = "GPU" + std::to_string(d) + " has " + std::to_string(total_mib) + " MiB";
                         break;
                     }
                 }
@@ -3245,53 +3245,26 @@ int main(int argc, char **argv) try {
         }
 #endif
 #else
+        // dpct's major/minor is the device version string (often "OpenCL 3.0"), not a CUDA compute
+        // capability. Printing it as sm_XX made an Arc look like an unsupported NVIDIA card.
         std::fprintf(
-            stderr, "strata generate: GPU %d: %s, compute capability %d.%d%s\n",
+            stderr, "strata generate: GPU %d: %s (SYCL, device version %d.%d)%s\n",
             dev, name,
-            /*
-            DPCT1005: The SYCL device version is different from CUDA
-            Compute Compatibility. You may need to rewrite this code.
-            */
             strata::cc_major_of(p.get_major_version()),
             strata::cc_minor_of(p.get_minor_version()),
             strata::emulated_cc()
                 ? " (STRATA_EMULATE_CC: a test mode, the card is emulated)"
                 : "");
-        {   // #542: a build whose libcudart is older than its headers (a CUDA 13 kit with a dangling libcudart.so that
-            // CMake resolved to the system's CUDA 12 one) reads cudaDeviceProp shifted - silently, and slowly
-            int rt = 0;
-            /*
-            DPCT1043: The version-related API is different in SYCL. An
-            initial code was generated, but you need to adjust it.
-            */
-            if (DPCT_CHECK_ERROR(rt = dpct::get_major_version(
-                                     dpct::get_current_device())) == 0 &&
-                rt / 1000 != DPCT_COMPAT_RT_VERSION / 1000)
-                std::fprintf(
-                    stderr,
-                    "strata generate: WARNING: this engine was compiled with "
-                    "CUDA %d.%d headers but "
-                    "loaded a CUDA %d.%d runtime (libcudart): GPU properties "
-                    "can read wrong and some "
-                    "kernels go unused. Rebuild it against one toolkit (cmake "
-                    "-DCUDAToolkit_ROOT=<the "
-                    "toolkit>, with its libcudart.so present) (#542)\n",
-                    DPCT_COMPAT_RT_VERSION / 1000,
-                    DPCT_COMPAT_RT_VERSION % 1000 / 10, rt / 1000,
-                    rt % 1000 / 10);
-        }
+        // #542 compared a CUDA runtime (DPCT_COMPAT_RT_VERSION 12.x) with dpct's device-version major.
+        // On SYCL that is 12 != 0 or 3, so every Arc start printed a false libcudart mismatch.
 #endif
         const std::string e = strata::core::device_code_error();
         if (!e.empty()) {
             std::fprintf(
                 stderr,
-                "strata generate: this engine has no code for %s (sm_%d%d): %s "
-                "- rebuild it for this "
-                /*
-                DPCT1005: The SYCL device version is different from CUDA
-                Compute Compatibility. You may need to rewrite this code.
-                */
-                "card (setup does: START-HERE.bat --setup)\n",
+                "strata generate: this engine has no runnable kernel on %s "
+                "(device version %d.%d): %s. Rebuild the SYCL engine "
+                "(docs/INTEL_ARC.md)\n",
                 name, p.get_major_version(), p.get_minor_version(), e.c_str());
             return 1;
         }

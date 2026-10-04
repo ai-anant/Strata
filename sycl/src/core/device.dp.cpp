@@ -123,11 +123,7 @@ bool device_summary(int ordinal, std::string &name, std::string &detail) try {
     std::snprintf(buf, sizeof(buf), "arch %s, %.1f GiB, wave%d", base_arch(p.gcnArchName).c_str(),
                   (double) p.totalGlobalMem / (1024.0 * 1024 * 1024), p.warpSize);
 #else
-    /*
-    DPCT1005: The SYCL device version is different from CUDA Compute
-    Compatibility. You may need to rewrite this code.
-    */
-    std::snprintf(buf, sizeof(buf), "compute capability %d.%d, %.1f GiB",
+    std::snprintf(buf, sizeof(buf), "SYCL device version %d.%d, %.1f GiB",
                   p.get_major_version(), p.get_minor_version(),
                   (double)p.get_global_mem_size() / (1024.0 * 1024 * 1024));
 #endif
@@ -285,7 +281,7 @@ DeviceInfo device_info(int ordinal) {
 #if defined(STRATA_USE_HIP)
         throw CudaError(std::string("no HIP device is present; this engine was compiled for ") + STRATA_HIP_ARCHS, -1);
 #else
-        throw CudaError("no CUDA device is present; Strata needs an NVIDIA GPU (RTX 20 series or newer)", -1);
+        throw CudaError("no SYCL device is present; the Intel engine needs a Level Zero or OpenCL GPU", -1);
 #endif
     }
     if (ordinal < 0 || ordinal >= count) {
@@ -344,29 +340,16 @@ DeviceInfo device_info(int ordinal) {
                                dpct::get_current_device())),
           "cudaRuntimeGetVersion");
 
-    // The engine supports compute capability 7.5 and newer (Turing: the QSA scorer's tf32 mma has a portable
-    // fp32-FMA fallback below sm_80, the tensor-core prompt kernels refuse and fall back).  Compiling for a
-    // supported arch is enforced by CMake; RUNNING on an older card is caught here, because a binary can be carried
-    // to a machine with an older card and would otherwise silently take whatever path the driver chose.  The HIP
-    // backend checks the card against the architectures the binary was compiled for (and wave32).
+    // HIP checks the card against the architectures the binary was compiled for (and wave32).
+    // The SYCL branch does not apply the CUDA sm_75 floor: see the #else below.
 #if defined(STRATA_USE_HIP)
     d.arch = base_arch(p.gcnArchName);
     if (const std::string why = arch_problem(p, ordinal); !why.empty()) throw CudaError(why, -1);
 #else
-    // #236: the experimental build (-DSTRATA_EXPERIMENTAL_SM60=ON: Pascal sm_60, Volta sm_70) runs on the cards it
-    // was built for - refusing them below 7.5 there made the flag useless; the release engine keeps 7.5
-#if defined(STRATA_EXPERIMENTAL_SM60)
-    constexpr int kMinCc = 60;
-    const char* const kNeed = "6.0 or newer (this is the experimental Pascal / Volta build)";
-#else
-    constexpr int kMinCc = 75;
-    const char* const kNeed = "7.5 or newer (RTX 20 / 30 / 40 / 50 series)";
-#endif
-    if (d.cc_major * 10 + d.cc_minor < kMinCc) {
-        throw CudaError("device " + d.name + " reports compute capability " + std::to_string(d.cc_major) +
-                            "." + std::to_string(d.cc_minor) + "; Strata needs compute capability " + kNeed,
-                        -1);
-    }
+    // SYCL port: dpct's major/minor is the device version string (often "OpenCL 3.0"), not a CUDA
+    // compute capability. The 7.5 floor is the CUDA engine's Turing check. Applied here it refuses an
+    // Arc (3.0 < 7.5) or accepts one by accident if the string starts with a larger number. The binary
+    // is already the Intel build; capability is the oneAPI device, not sm_75.
 #endif
     return d;
 }

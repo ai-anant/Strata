@@ -61,3 +61,15 @@ At 40K: expert GEMMs 23%, attention 19%, dequant 16%, QSA select 7%, host groupi
 
 - Fewer decode graph nodes (norm+rope, scores+top-k, gate+quantize fused): launch gaps are 15-20% of a round.
 - Two draft branches per verify window (decode is latency-bound).
+
+## Correctness, not speed (2026-10-05, no card)
+
+These are dpct leftovers on the path the engine actually calls. They are not kernel experiments; the measured
+speed items above stay as written.
+
+- [x] Host-only copies go through `strata::host_only_copy` (`sycl_queue.hpp`), including the running-state
+      copies in `conversation_state.cpp`. The snapshot transfer already did this after a B70 copy-engine reset;
+      the running-state path still queued every copy.
+- [x] Startup no longer prints the OpenCL device version as a CUDA compute capability, and no longer warns
+      that libcudart does not match `DPCT_COMPAT_RT_VERSION` (that comparison is 12 vs 3 on every Arc start).
+      `device_info()` no longer refuses the card for being below sm_75.
